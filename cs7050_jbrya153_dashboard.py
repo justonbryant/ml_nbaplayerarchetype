@@ -70,7 +70,7 @@ all_archetypes = df_assignments['Archetype'].unique().tolist()
 selected_archetypes = st.sidebar.multiselect(
     '1. Select Player Archetype(s):',
     options=all_archetypes,
-    default=all_archetypes
+    default=[]
 )
 
 player_search = st.sidebar.text_input(
