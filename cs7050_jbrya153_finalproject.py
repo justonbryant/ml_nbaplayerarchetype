@@ -1,3 +1,10 @@
+"""
+Author: Juston Bryant
+Course: CS 7050 - Data Warehouse Mining
+Instructor: Dr. Arthur Choi
+Title: NBA Player Archetype Clustering
+"""
+
 import pandas as pd
 import numpy as np
 import time
@@ -13,18 +20,9 @@ import sqlite3
 # Suppress FutureWarning from scikit-learn/KMeans
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-# --- Configuration ---
-# ADJUSTABLE VARIABLE: Number of players to analyze (set to 20 per your test)
+# DECLARE CONSTANT VARIABLES
 TOP_X_PLAYERS = 25
-
-# ADJUSTABLE VARIABLE: Number of clusters (set to 4 per your test)
 N_CLUSTERS = 10
-
-# Set the desired range of years for the project (1990-91 to 2024-25)
-#START_YEAR_PROJECT = 1990
-#END_YEAR_PROJECT = 2024
-
-# For efficient testing/runtime, set the run range here:
 START_YEAR_RUN = 2024
 END_YEAR_RUN = 2024
 
@@ -34,8 +32,7 @@ MAX_WORKERS = 8
 DB_PATH = 'nba_archetype_data.db'  # Database file path
 
 
-# --- Helper Functions ---
-
+# HELPER FUNCTIONS
 def get_season_list(start_year, end_year):
     """Generates a list of season strings (e.g., '2023-24')."""
     seasons = []
@@ -58,7 +55,8 @@ def convert_height_to_inches(height_str):
         return np.nan
 
 
-# --- 1. Fast Aggregated Seasonal Stats Retrieval (OPTIMIZED & CONCURRENT READY) ---
+# USER DEFINED FUNCTIONS
+# PLAYER STATISTICS BY SEASON
 def fetch_all_seasonal_stats_fast(season):
     """
     Fetches all player seasonal stats, calculates the Core Value,
@@ -98,7 +96,7 @@ def fetch_all_seasonal_stats_fast(season):
         return pd.DataFrame()
 
 
-# --- 2. Fetch General Player Details (Static Info - CONCURRENT) ---
+# PLAYER INFORMATION
 def fetch_player_general_details(player_ids):
     """Fetches non-statistical details for the filtered target players using concurrency."""
     all_details = []
@@ -141,8 +139,7 @@ def fetch_player_general_details(player_ids):
     return df_player_details
 
 
-# --- 3. CONCURRENT Fetch and Process Shot Chart Data ---
-
+# PLAYER SHOT CHART DATA
 def classify_shot_type(row):
     """Helper function to classify shot types consistently."""
     if row['SHOT_ZONE_RANGE'] == '24+ ft.': return 'Three_Pointer'
@@ -227,7 +224,7 @@ def fetch_and_process_shot_chart_data_concurrent(player_ids, season):
     return df_shot_pivot
 
 
-# --- 4. Main Data Collection and Merging Loop ---
+# COLLECT AND AGGREGATE PLAYER DATA OVER MULTIPLE SEASONS
 
 SEASONS_TO_FETCH = get_season_list(START_YEAR_RUN, END_YEAR_RUN)
 
@@ -235,7 +232,6 @@ SEASONS_TO_FETCH = get_season_list(START_YEAR_RUN, END_YEAR_RUN)
 def process_single_season(season):
     """Fetches, processes, and merges data for a single season."""
 
-    # 1. Fetch Seasonal Stats (AND FILTER TO TOP X)
     df_season_stats = fetch_all_seasonal_stats_fast(season)
 
     if df_season_stats.empty:
@@ -243,7 +239,6 @@ def process_single_season(season):
 
     TARGET_PLAYER_IDS = set(df_season_stats['PLAYER_ID'].unique())
 
-    # 3. Fetch and Process Shot Chart Data (CONCURRENTLY on only the TOP X)
     df_shot_chart_seasonal = fetch_and_process_shot_chart_data_concurrent(TARGET_PLAYER_IDS, season)
 
     # Merge Seasonal Stats and Shot Chart Data
@@ -296,25 +291,14 @@ if not all_player_stats_seasons:
     sys.exit()
 
 df_raw_seasonal_data = pd.concat(all_player_stats_seasons, ignore_index=True)
-
-# 2. Fetch General Player Details (STATIC INFO - on all unique players)
 df_player_details = fetch_player_general_details(all_player_details_ids)
-
-# --- 5. Final Data Cleaning and Feature Engineering ---
-
 df_data_for_clustering = df_raw_seasonal_data.copy()
 
-# ... (Previous filtering and renaming logic is here) ...
-
-# Ensure PLAYER_ID is a regular column in the seasonal stats DataFrame
 if 'PLAYER_ID' not in df_data_for_clustering.columns:
     df_data_for_clustering = df_data_for_clustering.reset_index(names=['PLAYER_ID'])
-
-# Ensure PLAYER_ID is a regular column in the player details DataFrame
 if 'PLAYER_ID' not in df_player_details.columns:
     df_player_details = df_player_details.reset_index(names=['PLAYER_ID'])
 
-# **ERROR LINE FIX (Line 314 is approximately here):**
 df_final_data = pd.merge(
     df_data_for_clustering,
     df_player_details,
@@ -322,22 +306,21 @@ df_final_data = pd.merge(
     how='left'
 ).drop_duplicates(subset=['PLAYER_ID', 'SEASON_ID'])
 
-# 1. FIX: RESOLVE MISSING NAMES (NaNs)
-# Use the robust dashboard name to fill any missing names from the concurrent API call failure.
+# NULL HANDLING AND FEATURE ENGINEERING FIXES
 df_final_data.loc[:, 'DISPLAY_FIRST_LAST'] = df_final_data['DISPLAY_FIRST_LAST'].fillna(
     df_final_data['PLAYER_NAME']
 )
 
-# 2. FIX: CONVERT HEIGHT/WEIGHT TO NUMERIC BEFORE IMPUTATION
+# HEIGHT/WEIGHT CONVERSION FIX
 df_final_data.loc[:, 'HEIGHT'] = df_final_data['HEIGHT'].apply(convert_height_to_inches)
 df_final_data.loc[:, 'WEIGHT'] = pd.to_numeric(df_final_data['WEIGHT'], errors='coerce')
 
-# 3. IMPUTATION: Fill NaNs for clustering features (including HEIGHT/WEIGHT)
+# HEIGHT/WEIGHT NULL HANDLING FIX
 df_final_data[['HEIGHT', 'WEIGHT']] = df_final_data[['HEIGHT', 'WEIGHT']].fillna(
     df_final_data[['HEIGHT', 'WEIGHT']].mean()
 )
 
-# 4. FEATURE ENGINEERING (creating per-36 min stats)
+# FEATURE ENGINEERING (PER-36 MINUTES STATS)
 for col in ['PTS', 'REB', 'AST', 'STL', 'BLK', 'TOV']:
     df_final_data.loc[:, f'{col}_Per_36'] = (df_final_data[col] / df_final_data['MIN']) * 36
 
@@ -359,8 +342,7 @@ for shot_type in ['Three_Pointer', 'Layup_Dunk_Near_Rime', 'Mid_Range_Jumper']:
     )
 
 
-# --- 6. K-Means Clustering Implementation and Labeling ---
-
+# K-MEANS CLUSTERING AND ARCHETYPE LABELING
 def generate_archetype_label(row, cluster_centers):
     """
     Generates a descriptive archetype label for a cluster based on feature prominence.
@@ -517,22 +499,15 @@ df_final_data = pd.merge(
     on='PLAYER_ID',
     how='left'
 ).drop_duplicates(subset=['PLAYER_ID', 'SEASON_ID'])
-
-# 1. FIX: RESOLVE MISSING NAMES (NaNs)
 df_final_data.loc[:, 'DISPLAY_FIRST_LAST'] = df_final_data['DISPLAY_FIRST_LAST'].fillna(
     df_final_data['NAME_DASHBOARD_BACKUP']
 )
-
-# 2. FIX: CONVERT HEIGHT/WEIGHT TO NUMERIC BEFORE IMPUTATION
 df_final_data.loc[:, 'HEIGHT'] = df_final_data['HEIGHT'].apply(convert_height_to_inches)
 df_final_data.loc[:, 'WEIGHT'] = pd.to_numeric(df_final_data['WEIGHT'], errors='coerce')
-
-# 3. IMPUTATION: Fill NaNs for clustering features (including HEIGHT/WEIGHT)
 df_final_data[['HEIGHT', 'WEIGHT']] = df_final_data[['HEIGHT', 'WEIGHT']].fillna(
     df_final_data[['HEIGHT', 'WEIGHT']].mean()
 )
 
-# 4. FEATURE ENGINEERING (creating per-36 min stats)
 for col in ['PTS', 'REB', 'AST', 'STL', 'BLK', 'TOV']:
     df_final_data.loc[:, f'{col}_Per_36'] = (df_final_data[col] / df_final_data['MIN']) * 36
 
@@ -553,8 +528,7 @@ for shot_type in ['Three_Pointer', 'Layup_Dunk_Near_Rime', 'Mid_Range_Jumper']:
         0
     )
 
-# --- 7. K-Means Clustering and Data Saving ---
-
+# K-MEANS CLUSTERING IMPLEMENTATION AND LABELING
 df_clustered_seasonal_data, df_cluster_details = run_kmeans_clustering(df_final_data.copy(), n_clusters=N_CLUSTERS)
 
 # Define the full set of columns to save for the interactive dashboard
